@@ -1,0 +1,15 @@
+{
+  "name": "movie-platform-mongodb",
+  "version": "1.0.0",
+  "description": "MongoDB backend for the Movie Discovery & Review Platform",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node seed-mongodb.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "mongodb": "^6.8.0"
+  }
+}
