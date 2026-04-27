@@ -1,0 +1,28 @@
+### Health check
+GET http://localhost:3000/health
+
+### All movies
+GET http://localhost:3000/api/movies
+
+### Search by plot keyword
+GET http://localhost:3000/api/movies/search?q=dream
+
+### Single movie with reviews
+GET http://localhost:3000/api/movies/mov_inception 
+
+### Dashboard - top movies
+GET http://localhost:3000/api/dashboard
+
+### Dashboard - genre stats
+GET http://localhost:3000/api/dashboard?type=genre_stats
+
+### Add a review
+POST http://localhost:3000/api/movies/mov_dune/reviews
+Content-Type: application/json
+
+{
+  "user_id": "usr_003",
+  "rating": 5,
+  "text": "Epic world-building!"
+}
+
