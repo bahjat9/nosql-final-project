@@ -7,14 +7,20 @@ GET http://localhost:3000/api/movies
 ### Search by plot keyword
 GET http://localhost:3000/api/movies/search?q=dream
 
-### Single movie with reviews
-GET http://localhost:3000/api/movies/mov_inception 
+### Single movie with reviews and recommentdations
+GET http://localhost:3000/api/movies/mov_inception?user_id=usr_001 
 
 ### Dashboard - top movies
 GET http://localhost:3000/api/dashboard
 
 ### Dashboard - genre stats
 GET http://localhost:3000/api/dashboard?type=genre_stats
+
+## See a review
+GET http://localhost:3000/api/movies/mov_inception/reviews
+
+## See users and who they follow 
+GET http://localhost:3000/api/users/usr_001
 
 ### Add a review
 POST http://localhost:3000/api/movies/mov_dune/reviews
