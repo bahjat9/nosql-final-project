@@ -1,6 +1,7 @@
 const { MongoClient } = require('mongodb');
 
 const URI = process.env.MONGO_URI || 'mongodb://localhost:27017';
+const { reviews } = require('./seed-data');
 
 async function seedMongo() {
   const client = new MongoClient(URI);
@@ -144,25 +145,6 @@ async function seedMongo() {
     ]);
     console.log('Inserted 6 users.');
 
-    // ── REVIEWS ──────────────────────────────────────────────────────────────
-    const reviews = [
-      { movie_id: 'mov_inception',   user_id: 'usr_001', rating: 5, text: 'Mind-blowing concept executed perfectly. A masterpiece of modern cinema.', created_at: new Date('2024-01-10') },
-      { movie_id: 'mov_inception',   user_id: 'usr_002', rating: 5, text: 'The dream-within-a-dream concept is genius. Rewatched 5 times.', created_at: new Date('2024-02-14') },
-      { movie_id: 'mov_inception',   user_id: 'usr_991', rating: 5, text: 'Mind-blowing.', created_at: new Date('2023-05-01') },
-      { movie_id: 'mov_interstellar', user_id: 'usr_002', rating: 5, text: 'Made me cry. The father-daughter relationship hits different in space.', created_at: new Date('2024-01-20') },
-      { movie_id: 'mov_interstellar', user_id: 'usr_882', rating: 5, text: 'Made me cry.', created_at: new Date('2023-06-01') },
-      { movie_id: 'mov_interstellar', user_id: 'usr_003', rating: 4, text: 'Visually stunning but the ending was a bit convoluted.', created_at: new Date('2024-03-05') },
-      { movie_id: 'mov_matrix',      user_id: 'usr_001', rating: 5, text: 'Revolutionary filmmaking. Changed action cinema forever.', created_at: new Date('2024-01-05') },
-      { movie_id: 'mov_matrix',      user_id: 'usr_003', rating: 5, text: 'Still holds up in 2024. A classic.', created_at: new Date('2024-04-12') },
-      { movie_id: 'mov_dune',        user_id: 'usr_004', rating: 5, text: 'Denis Villeneuve outdid himself. Epic world-building.', created_at: new Date('2024-02-28') },
-      { movie_id: 'mov_dune',        user_id: 'usr_001', rating: 4, text: 'Beautiful visuals but slow pacing in the first act.', created_at: new Date('2024-03-15') },
-      { movie_id: 'mov_parasite',    user_id: 'usr_002', rating: 5, text: 'Oscar well deserved. The class commentary is razor sharp.', created_at: new Date('2024-01-30') },
-      { movie_id: 'mov_parasite',    user_id: 'usr_004', rating: 5, text: 'Best film of 2019. Bong Joon-ho is a genius.', created_at: new Date('2024-02-10') },
-      { movie_id: 'mov_dark_knight', user_id: 'usr_003', rating: 5, text: 'Heath Ledger\'s Joker is the greatest villain performance ever.', created_at: new Date('2024-01-25') },
-      { movie_id: 'mov_dark_knight', user_id: 'usr_001', rating: 5, text: 'The best superhero film ever made. Not even close.', created_at: new Date('2024-04-01') },
-      { movie_id: 'mov_whiplash',    user_id: 'usr_004', rating: 5, text: 'J.K. Simmons is terrifying. The final performance scene is perfect.', created_at: new Date('2024-03-20') },
-      { movie_id: 'mov_avatar',      user_id: 'usr_002', rating: 4, text: 'Visually groundbreaking even if the story is predictable.', created_at: new Date('2024-02-05') },
-    ];
 
     await db.collection('reviews').insertMany(reviews);
     console.log('Inserted 16 reviews.');
@@ -188,5 +170,4 @@ async function seedMongo() {
     await client.close();
   }
 }
-
 seedMongo();

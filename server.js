@@ -4,8 +4,23 @@ const { MongoClient, ObjectId } = require('mongodb');
 const app = express();
 app.use(express.json());
 
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017';
+if (!process.env.MONGO_URI) {
+  throw new Error("MONGO_URI is not set");
+}
+const MONGO_URI = process.env.MONGO_URI;
 const PORT = process.env.PORT || 3000;
+const neo4j = require('neo4j-driver');
+
+const neoDriver = neo4j.driver(
+  process.env.NEO4J_URI,
+  neo4j.auth.basic(
+    process.env.NEO4J_USER,
+    process.env.NEO4J_PASSWORD
+  ),
+  {
+    encrypted: 'ENCRYPTION_OFF'
+  }
+);
 
 let db;
 
@@ -16,13 +31,84 @@ async function connectDB() {
   console.log('Connected to MongoDB');
 }
 
+async function getRecommendations(movieId) {
+  const session = neoDriver.session();
+
+  try {
+    const result = await session.run(`
+      MATCH (:Movie {id: $id})<-[:ACTED_IN]-(a:Person)
+      MATCH (a)-[:ACTED_WITH]->(coActor)
+      MATCH (coActor)-[:ACTED_IN]->(rec:Movie)
+      WHERE rec.id <> $id
+      RETURN rec.id AS id, rec.title AS title, COUNT(DISTINCT coActor) AS score
+      ORDER BY score DESC
+      LIMIT 5
+    `, { id: movieId });
+
+    return result.records.map(r => ({
+      id: r.get('id'),
+      title: r.get('title'),
+      score: r.get('score').toInt(),
+    }));
+
+  } finally {
+    await session.close();
+  }
+}
+
+async function getSocialRecommendations(movieId, userId) {
+  const session = neoDriver.session();
+
+  try {
+    const result = await session.run(`
+      MATCH (u:User {id: $userId})-[:FOLLOWS]->(f:User)
+      MATCH (f)-[rev:REVIEWED]->(m:Movie)
+      WHERE m.id <> $movieId
+      RETURN m.id AS id,
+             COUNT(f) AS score,
+             AVG(rev.rating) AS avgRating
+      ORDER BY score DESC, avgRating DESC
+      LIMIT 5
+    `, { movieId, userId });
+
+    return result.records.map(r => ({
+      id: r.get('id'),
+      score: r.get('score').toInt(),
+      avgRating: r.get('avgRating'),
+      type: 'social'
+    }));
+  } finally {
+    await session.close();
+  }
+}
+
+async function getUserFollows(userId) {
+  const session = neoDriver.session();
+
+  try {
+    const result = await session.run(`
+      MATCH (u:User {id: $userId})-[:FOLLOWS]->(f:User)
+      RETURN f.id AS id, f.username AS username
+    `, { userId });
+
+    return result.records.map(r => ({
+      id: r.get('id'),
+      username: r.get('username')
+    }));
+  } finally {
+    await session.close();
+  }
+}
+
 // ── MOVIES ───────────────────────────────────────────────────────────────────
 
 // GET /api/movies — list all movies, optional ?genre= filter
 app.get('/api/movies', async (req, res) => {
   try {
     const filter = {};
-    if (req.query.genre) filter.genres = req.query.genre;
+    if (req.query.genre) {
+      filter.genres = req.query.genre;
+    }
 
     const movies = await db.collection('movies')
       .find(filter)
@@ -59,6 +145,8 @@ app.get('/api/movies/search', async (req, res) => {
 // GET /api/movies/:id — single movie with reviews
 app.get('/api/movies/:id', async (req, res) => {
   try {
+    const movieId = req.params.id;
+    const userId = req.query.user_id;
     const movie = await db.collection('movies').findOne({ _id: req.params.id });
     if (!movie) return res.status(404).json({ error: 'Movie not found' });
 
@@ -66,8 +154,48 @@ app.get('/api/movies/:id', async (req, res) => {
       .find({ movie_id: req.params.id })
       .sort({ created_at: -1 })
       .toArray();
+    
+    
+    
+    const recommendations = await getRecommendations(movieId);
+    const socialRecommendations = userId
+  ? await getSocialRecommendations(movieId, userId)
+  : [];
 
-    res.json({ ...movie, reviews });
+    const recIds = recommendations.map(r => r.id);
+    const socialIds = socialRecommendations.map(r => r.id);
+
+    const recMovies = await db.collection('movies')
+      .find({ _id: { $in: recIds } })
+      .project({ title: 1, poster: 1, avg_rating: 1 })
+      .toArray();
+    
+    const socialMovies = await db.collection('movies')
+      .find({ _id: { $in: socialIds } })
+      .project({ title: 1, poster: 1, avg_rating: 1 })
+      .toArray();
+    
+    const enrichedRecommendations = recommendations.map(r => {
+      const details = recMovies.find(m => m._id === r.id);
+      return {
+        ...r,
+        ...(details || {}),
+      };
+      });
+      const enrichedSocial = socialRecommendations.map(r => {
+        const details = socialMovies.find(m => m._id === r.id);
+        return {
+          ...r,
+          ...(details || {})
+        };
+      });
+
+    res.json({
+  ...movie,
+  reviews,
+  movie_recommendations: enrichedRecommendations,
+  social_recommendations: enrichedSocial
+});
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -112,6 +240,9 @@ app.post('/api/movies/:id/reviews', async (req, res) => {
 
     await db.collection('reviews').insertOne(review);
 
+// TODO
+//    update movie invrement number of reviews and total of all reviews. You can calculate the average at readtime
+
     // Recalculate avg_rating and review_count
     const stats = await db.collection('reviews').aggregate([
       { $match: { movie_id: req.params.id } },
@@ -138,7 +269,14 @@ app.get('/api/users/:id', async (req, res) => {
   try {
     const user = await db.collection('users').findOne({ _id: req.params.id });
     if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json(user);
+
+    const follows = await getUserFollows(req.params.id);
+
+    res.json({
+      ...user,
+      follows
+    });
+
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -243,3 +381,7 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', db: 'mongodb' }));
 connectDB()
   .then(() => app.listen(PORT, () => console.log(`MongoDB API running on port ${PORT}`)))
   .catch((err) => { console.error('Failed to connect to MongoDB:', err); process.exit(1); });
+
+process.on('exit', async () => {
+  await neoDriver.close();
+});
