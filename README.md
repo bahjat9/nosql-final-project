@@ -93,8 +93,13 @@ Open `test.http` in VSCode with the **REST Client** extension (Huachao Mao) inst
 #### Redis
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/api/trending` | Top trending movies from Redis sorted set |
-| POST | `/api/trending/:id/view` | Increment a movie's trending score |
+| GET | `/api/trending` | Top trending movies from Redis sorted set. Optional `?limit=N` (default 10) |
+| GET | `/api/trending/daily` | Today's trending from daily sorted set |
+| POST | `/api/trending/:id/view` | Increment a movie's trending score (all-time + daily, atomic) |
+| POST | `/api/sessions/login` | Create a session `{ user_id, username, role }` — stored as Redis Hash |
+| GET | `/api/sessions/:id` | Read session data, slides TTL by 1 hour |
+| DELETE | `/api/sessions/:id` | Logout / destroy session |
+| DELETE | `/api/dashboard/cache` | Manually bust all cached dashboard responses |
 
 #### Health
 | Method | Endpoint | Description |
@@ -177,11 +182,12 @@ ORDER BY score DESC LIMIT 5
 
 | Key pattern | Type | Purpose | TTL |
 |---|---|---|---|
-| `leaderboard:trending` | Sorted Set | Movie view scores for trending | None |
-| `cache:dashboard:*` | String (JSON) | Cached dashboard responses | 1 hour |
+| `trending:movies` | Sorted Set | All-time movie view scores | None |
+| `trending:daily:YYYY-MM-DD` | Sorted Set | Daily movie view scores | 24 hours |
+| `cache:dashboard:*` | String (JSON) | Cached dashboard responses | 30 seconds |
 | `cache:movie:*` | Hash | Cached movie stats | 1 hour |
-| `session:<user_id>_token` | String | Active user sessions | 30 min |
-| `rate:<ip>` | String | Request count for rate limiting | 1 min |
+| `session:<user_id>_token` | Hash | Session data (userId, username, role, createdAt) | 1 hour (sliding) |
+| `ratelimit:<ip>` | String | Request count for rate limiting | 1 min |
 
 ---
 
