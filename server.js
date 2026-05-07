@@ -1,9 +1,38 @@
 require('dotenv').config();
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
+const { createClient } = require('redis');
 
 const app = express();
 app.use(express.json());
+
+// Rate limiting — max 100 requests per minute per IP using Redis
+app.use(async (req, res, next) => {
+  if (!redis) return next();
+  try {
+    const key = `rate:${req.ip}`;
+    const count = await redis.incr(key);
+    if (count === 1) await redis.expire(key, 60);
+    if (count > 100) return res.status(429).json({ error: 'Too many requests, slow down' });
+    next();
+  } catch {
+    next();
+  }
+});
+
+// Session validation — routes that require a valid session token
+// Pass header: Authorization: Bearer session:<user_id>_token
+async function requireSession(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return res.status(401).json({ error: 'No session token provided' });
+  try {
+    const status = await redis.get(token);
+    if (status !== 'active') return res.status(401).json({ error: 'Invalid or expired session' });
+    next();
+  } catch {
+    next();
+  }
+}
 
 if (!process.env.MONGO_URI) {
   throw new Error("MONGO_URI is not set");
@@ -24,6 +53,14 @@ const neoDriver = neo4j.driver(
 );
 
 let db;
+let redis;
+
+async function connectRedis() {
+  redis = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
+  redis.on('error', (err) => console.error('Redis error:', err));
+  await redis.connect();
+  console.log('Connected to Redis');
+}
 
 async function connectDB() {
   const client = new MongoClient(MONGO_URI);
@@ -322,6 +359,13 @@ app.get('/api/users/:id/reviews', async (req, res) => {
 app.get('/api/dashboard', async (req, res) => {
   try {
     const type = req.query.type || 'top_movies';
+    const cacheKey = `cache:dashboard:${type}`;
+
+    // Check Redis cache first — return immediately if fresh data exists
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return res.json({ ...JSON.parse(cached), from_cache: true });
+    }
 
     if (type === 'genre_stats') {
       /*
@@ -352,7 +396,9 @@ app.get('/api/dashboard', async (req, res) => {
         },
       ]).toArray();
 
-      return res.json({ type: 'genre_stats', data: genreStats });
+      const response = { type: 'genre_stats', data: genreStats };
+      await redis.set(cacheKey, JSON.stringify(response), { EX: 3600 });
+      return res.json(response);
     }
 
     /*
@@ -383,7 +429,57 @@ app.get('/api/dashboard', async (req, res) => {
       { $limit: 10 },
     ]).toArray();
 
-    res.json({ type: 'top_movies', data: topMovies });
+    const response = { type: 'top_movies', data: topMovies };
+    await redis.set(cacheKey, JSON.stringify(response), { EX: 3600 });
+    res.json(response);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── TRENDING ─────────────────────────────────────────────────────────────────
+
+// GET /api/trending — top movies from Redis sorted set, enriched with MongoDB data
+app.get('/api/trending', async (req, res) => {
+  try {
+    // Get top 10 movies by score from Redis leaderboard (highest score first)
+    const trending = await redis.zRangeWithScores('leaderboard:trending', 0, 9, { REV: true });
+
+    if (!trending.length) return res.json([]);
+
+    const ids = trending.map(t => t.value);
+
+    // Enrich with full movie details from MongoDB
+    const movies = await db.collection('movies')
+      .find({ _id: { $in: ids } })
+      .project({ title: 1, year: 1, genres: 1, director: 1, avg_rating: 1, review_count: 1, total_rating: 1, poster: 1 })
+      .toArray();
+
+    const moviesMap = Object.fromEntries(movies.map(m => [m._id, m]));
+
+    const result = trending.map(t => {
+      const movie = moviesMap[t.value] || {};
+      return {
+        ...movie,
+        _id: t.value,
+        trending_score: t.score,
+        avg_rating: movie.review_count > 0
+          ? Math.round((movie.total_rating / movie.review_count) * 10) / 10
+          : 0,
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/trending/:id/view — increment a movie's trending score
+app.post('/api/trending/:id/view', async (req, res) => {
+  try {
+    const newScore = await redis.zIncrBy('leaderboard:trending', 1, req.params.id);
+    res.json({ movie_id: req.params.id, trending_score: newScore });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -395,9 +491,9 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', db: 'mongodb' }));
 
 // ── START ─────────────────────────────────────────────────────────────────────
 
-connectDB()
+Promise.all([connectDB(), connectRedis()])
   .then(() => app.listen(PORT, () => console.log(`MongoDB API running on port ${PORT}`)))
-  .catch((err) => { console.error('Failed to connect to MongoDB:', err); process.exit(1); });
+  .catch((err) => { console.error('Failed to start server:', err); process.exit(1); });
 
 process.on('exit', async () => {
   await neoDriver.close();
