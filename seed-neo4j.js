@@ -3,7 +3,7 @@ const { reviews } = require('./seed-data.js');
 
 async function seedNeo4j() {
   const driver = neo4j.driver(
-    'bolt://neo4j:7687',
+    process.env.NEO4J_URI || 'bolt://localhost:7687',
     neo4j.auth.basic('neo4j', 'password123'),
      {
     encrypted: 'ENCRYPTION_OFF' 
