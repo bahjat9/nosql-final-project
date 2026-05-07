@@ -181,7 +181,7 @@ app.get('/api/movies/search', async (req, res) => {
           index: 'movies_search',
           text: {
             query: q,
-            path: ['title', 'plot', 'genres'],
+            path: ['title', 'plot', 'genres', 'director', 'cast'],
             fuzzy: { maxEdits: 1 }, // allows 1-character typos
           },
         },
