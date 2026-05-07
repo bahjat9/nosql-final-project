@@ -1,0 +1,122 @@
+# ============================================================
+# Movie Platform API - Test Suite
+# Requirements: REST Client extension (Huachao Mao) in VSCode
+# Make sure the server is running: docker compose up -d
+# ============================================================
+
+
+# ── HEALTH ───────────────────────────────────────────────────
+
+### Health Check
+GET http://localhost:3000/health
+
+
+# ── MONGODB: MOVIES ──────────────────────────────────────────
+
+### Get all movies (sorted by rating)
+GET http://localhost:3000/api/movies
+
+###
+
+### Filter movies by genre
+GET http://localhost:3000/api/movies?genre=Sci-Fi
+
+###
+
+### Get a single movie with full details
+GET http://localhost:3000/api/movies/mov_inception
+
+###
+
+### Get a single movie with Neo4j recommendations (pass user for social recs)
+GET http://localhost:3000/api/movies/mov_inception?user_id=usr_001
+
+
+# ── MONGODB: ATLAS SEARCH ────────────────────────────────────
+
+### Search movies by plot keyword (fuzzy - typos allowed)
+GET http://localhost:3000/api/movies/search?q=dream
+
+###
+
+### Search by director name
+GET http://localhost:3000/api/movies/search?q=nolan
+
+###
+
+### Search with a typo (fuzzy matching)
+GET http://localhost:3000/api/movies/search?q=matix
+
+
+# ── MONGODB: REVIEWS ─────────────────────────────────────────
+
+### Get all reviews for a movie
+GET http://localhost:3000/api/movies/mov_inception/reviews
+
+###
+
+### Add a new review
+POST http://localhost:3000/api/movies/mov_dune/reviews
+Content-Type: application/json
+
+{
+  "user_id": "usr_003",
+  "rating": 5,
+  "text": "Epic world-building, Villeneuve at his best!"
+}
+
+
+# ── MONGODB: USERS ───────────────────────────────────────────
+
+### Get a user profile (includes Neo4j follows)
+GET http://localhost:3000/api/users/usr_001
+
+###
+
+### Get all reviews written by a user
+GET http://localhost:3000/api/users/usr_001/reviews
+
+
+# ── MONGODB: DASHBOARD (Aggregation Pipelines) ───────────────
+
+### Pipeline 1 - Genre statistics (movie count + avg rating per genre)
+GET http://localhost:3000/api/dashboard?type=genre_stats
+
+###
+
+### Pipeline 2 - Top 10 movies leaderboard
+GET http://localhost:3000/api/dashboard
+
+###
+
+### Hit dashboard again - should return from_cache: true (Redis cache)
+GET http://localhost:3000/api/dashboard
+
+
+# ── REDIS: TRENDING ──────────────────────────────────────────
+
+### Get trending movies (from Redis sorted set leaderboard)
+GET http://localhost:3000/api/trending
+
+###
+
+### Increment a movie's trending score (simulates a view)
+POST http://localhost:3000/api/trending/mov_inception/view
+
+###
+
+### Trending again - Inception score should now be 1 higher
+GET http://localhost:3000/api/trending
+
+
+# ── REDIS: SESSION ───────────────────────────────────────────
+
+### Request with a valid session token (seeded by seed-redis.js)
+GET http://localhost:3000/api/users/usr_991
+Authorization: Bearer session:usr_991_token
+
+###
+
+### Request with an invalid/expired session token
+GET http://localhost:3000/api/users/usr_001
+Authorization: Bearer session:fake_token
