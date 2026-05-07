@@ -31,7 +31,6 @@ The databases share a common ID scheme (e.g. `mov_inception`, `usr_001`) so they
 ```bash
 git clone https://github.com/bahjat9/nosql-final-project.git
 cd nosql-final-project
-git checkout final-merge
 ```
 
 ### 2. Install dependencies
