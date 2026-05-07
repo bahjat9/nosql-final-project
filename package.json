@@ -9,6 +9,7 @@
     "seed": "node seed-mongodb.js"
   },
   "dependencies": {
+    "dotenv": "^17.4.2",
     "express": "^4.22.1",
     "mongodb": "^6.21.0",
     "neo4j-driver": "^6.0.1"

@@ -1,19 +1,6 @@
 version: '3.8'
 
 services:
-  mongodb:
-    image: mongo:7
-    container_name: movie_mongodb
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongodb_data:/data/db
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
   neo4j:
     image: neo4j:5
     container_name: movie_neo4j
@@ -27,25 +14,22 @@ services:
     restart: unless-stopped
 
   app:
-    build: . 
+    build: .
     container_name: movie_api
     ports:
       - "3000:3000"
+    env_file:
+      - .env
     environment:
-      - MONGO_URI=mongodb://mongodb:27017
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=password123 
+      - NEO4J_PASSWORD=password123
       - PORT=3000
     volumes:
-      - .:/app 
+      - .:/app
     depends_on:
-      mongodb:
-        condition: service_healthy
-      neo4j:
-        condition: service_started
+      - neo4j
     restart: unless-stopped
 
 volumes:
-  mongodb_data:
   neo4j_data:
