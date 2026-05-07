@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { MongoClient } = require('mongodb');
 
 const URI = process.env.MONGO_URI || 'mongodb://localhost:27017';
@@ -18,12 +19,8 @@ async function seedMongo() {
     await db.collection('reviews').deleteMany({});
     console.log('Cleared old data.');
 
-    // Create text index on movies for plot/title search
-    await db.collection('movies').createIndex(
-      { title: 'text', plot: 'text', genres: 'text' },
-      { name: 'movie_text_search' }
-    );
-    console.log('Created text index on movies.');
+    // Note: Search index (movies_search) is created manually in the Atlas UI.
+    // See README for instructions.
 
     // ── MOVIES ──────────────────────────────────────────────────────────────
     await db.collection('movies').insertMany([
@@ -37,7 +34,8 @@ async function seedMongo() {
         cast: ['Leonardo DiCaprio', 'Joseph Gordon-Levitt', 'Elliot Page'],
         plot: 'A thief who steals corporate secrets through the use of dream-sharing technology is given the inverse task of planting an idea into the mind of a C.E.O.',
         poster: 'https://example.com/inception.jpg',
-        avg_rating: 4.8,
+        avg_rating: 0,
+        total_rating: 0,
         review_count: 0,
       },
       {
@@ -50,7 +48,8 @@ async function seedMongo() {
         cast: ['Matthew McConaughey', 'Anne Hathaway', 'Jessica Chastain'],
         plot: 'A team of explorers travel through a wormhole in space in an attempt to ensure humanity\'s survival on a distant planet.',
         poster: 'https://example.com/interstellar.jpg',
-        avg_rating: 4.7,
+        avg_rating: 0,
+        total_rating: 0,
         review_count: 0,
       },
       {
@@ -63,7 +62,8 @@ async function seedMongo() {
         cast: ['Keanu Reeves', 'Laurence Fishburne', 'Carrie-Anne Moss'],
         plot: 'A computer hacker learns from mysterious rebels about the true nature of his reality and his role in the war against its controllers.',
         poster: 'https://example.com/matrix.jpg',
-        avg_rating: 4.9,
+        avg_rating: 0,
+        total_rating: 0,
         review_count: 0,
       },
       {
@@ -76,7 +76,8 @@ async function seedMongo() {
         cast: ['Timothée Chalamet', 'Rebecca Ferguson', 'Zendaya'],
         plot: 'A noble family becomes embroiled in a war for control over the galaxy\'s most valuable asset while its heir becomes troubled by visions of a dark future.',
         poster: 'https://example.com/dune.jpg',
-        avg_rating: 4.5,
+        avg_rating: 0,
+        total_rating: 0,
         review_count: 0,
       },
       {
@@ -89,7 +90,8 @@ async function seedMongo() {
         cast: ['Sam Worthington', 'Zoe Saldana', 'Sigourney Weaver'],
         plot: 'A paraplegic Marine dispatched to the moon Pandora on a unique mission becomes torn between following his orders and protecting the world he feels is his home.',
         poster: 'https://example.com/avatar.jpg',
-        avg_rating: 4.1,
+        avg_rating: 0,
+        total_rating: 0,
         review_count: 0,
       },
       {
@@ -102,7 +104,8 @@ async function seedMongo() {
         cast: ['Song Kang-ho', 'Lee Sun-kyun', 'Cho Yeo-jeong'],
         plot: 'Greed and class discrimination threaten the newly formed symbiotic relationship between the wealthy Park family and the destitute Kim clan.',
         poster: 'https://example.com/parasite.jpg',
-        avg_rating: 4.9,
+        avg_rating: 0,
+        total_rating: 0,
         review_count: 0,
       },
       {
@@ -115,7 +118,8 @@ async function seedMongo() {
         cast: ['Christian Bale', 'Heath Ledger', 'Aaron Eckhart'],
         plot: 'When the menace known as the Joker wreaks havoc and chaos on the people of Gotham, Batman must accept one of the greatest psychological and physical tests of his ability to fight injustice.',
         poster: 'https://example.com/darkknight.jpg',
-        avg_rating: 4.9,
+        avg_rating: 0,
+        total_rating: 0,
         review_count: 0,
       },
       {
@@ -128,7 +132,8 @@ async function seedMongo() {
         cast: ['Miles Teller', 'J.K. Simmons', 'Melissa Benoist'],
         plot: 'A promising young drummer enrolls at a cut-throat music conservatory where his dreams of greatness are mentored by an instructor who will stop at nothing to realize a student\'s potential.',
         poster: 'https://example.com/whiplash.jpg',
-        avg_rating: 4.8,
+        avg_rating: 0,
+        total_rating: 0,
         review_count: 0,
       },
     ]);
@@ -149,18 +154,19 @@ async function seedMongo() {
     await db.collection('reviews').insertMany(reviews);
     console.log('Inserted 16 reviews.');
 
-    // Update review counts on movies using aggregation result
+    // Update review_count and total_rating on each movie.
+    // avg_rating is derived at read time (total_rating / review_count).
     const reviewCounts = await db.collection('reviews').aggregate([
-      { $group: { _id: '$movie_id', count: { $sum: 1 }, avg: { $avg: '$rating' } } }
+      { $group: { _id: '$movie_id', count: { $sum: 1 }, total: { $sum: '$rating' } } }
     ]).toArray();
 
-    for (const { _id, count, avg } of reviewCounts) {
+    for (const { _id, count, total } of reviewCounts) {
       await db.collection('movies').updateOne(
         { _id },
-        { $set: { review_count: count, avg_rating: Math.round(avg * 10) / 10 } }
+        { $set: { review_count: count, total_rating: total } }
       );
     }
-    console.log('Updated movie review counts and avg ratings.');
+    console.log('Updated movie review_count and total_rating.');
 
     console.log('\nMongoDB Seeding Complete!');
   } catch (err) {
