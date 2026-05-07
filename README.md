@@ -220,11 +220,3 @@ ORDER BY score DESC LIMIT 5
 ├── .env.example       # Template for environment variables
 └── .gitignore
 ```
-
----
-
-## Team
-
-- **Ibaad** — MongoDB (Atlas Search, aggregation pipelines, reviews, dashboard) + Redis integration
-- **Bahjat** — Neo4j (graph relationships, actor-based and social recommendations)
-- **[Third member]** — Redis (seed data, trending leaderboard, session management)
