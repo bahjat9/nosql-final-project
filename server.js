@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 
@@ -122,19 +123,41 @@ app.get('/api/movies', async (req, res) => {
   }
 });
 
-// GET /api/movies/search?q= — full-text search on title, plot, genres
+// GET /api/movies/search?q= — Atlas Search on title, plot, genres
+// Uses MongoDB Atlas Search ($search) with fuzzy matching so typos still work.
+// The Atlas Search index named "movies_search" must be created on the
+// movie_platform.movies collection in the Atlas UI (see README).
 app.get('/api/movies/search', async (req, res) => {
   try {
     const q = req.query.q;
     if (!q) return res.status(400).json({ error: 'Query parameter "q" is required' });
 
-    const results = await db.collection('movies')
-      .find(
-        { $text: { $search: q } },
-        { projection: { score: { $meta: 'textScore' } } }
-      )
-      .sort({ score: { $meta: 'textScore' } })
-      .toArray();
+    const results = await db.collection('movies').aggregate([
+      {
+        $search: {
+          index: 'movies_search',
+          text: {
+            query: q,
+            path: ['title', 'plot', 'genres'],
+            fuzzy: { maxEdits: 1 }, // allows 1-character typos
+          },
+        },
+      },
+      {
+        $addFields: {
+          search_score: { $meta: 'searchScore' },
+          avg_rating: {
+            $cond: [
+              { $gt: ['$review_count', 0] },
+              { $round: [{ $divide: ['$total_rating', '$review_count'] }, 1] },
+              0,
+            ],
+          },
+        },
+      },
+      { $sort: { search_score: -1 } },
+      { $project: { plot: 0, total_rating: 0 } },
+    ]).toArray();
 
     res.json(results);
   } catch (err) {
@@ -149,6 +172,11 @@ app.get('/api/movies/:id', async (req, res) => {
     const userId = req.query.user_id;
     const movie = await db.collection('movies').findOne({ _id: req.params.id });
     if (!movie) return res.status(404).json({ error: 'Movie not found' });
+
+    // Calculate avg_rating at read time from stored totals
+    movie.avg_rating = movie.review_count > 0
+      ? Math.round((movie.total_rating / movie.review_count) * 10) / 10
+      : 0;
 
     const reviews = await db.collection('reviews')
       .find({ movie_id: req.params.id })
@@ -167,28 +195,27 @@ app.get('/api/movies/:id', async (req, res) => {
 
     const recMovies = await db.collection('movies')
       .find({ _id: { $in: recIds } })
-      .project({ title: 1, poster: 1, avg_rating: 1 })
+      .project({ title: 1, poster: 1, avg_rating: 1, review_count: 1, total_rating: 1 })
       .toArray();
-    
+
     const socialMovies = await db.collection('movies')
       .find({ _id: { $in: socialIds } })
-      .project({ title: 1, poster: 1, avg_rating: 1 })
+      .project({ title: 1, poster: 1, avg_rating: 1, review_count: 1, total_rating: 1 })
       .toArray();
-    
+
+    // Use hashmaps for O(1) lookups instead of O(n) .find() inside .map()
+    const recMoviesMap = Object.fromEntries(recMovies.map(m => [m._id, m]));
+    const socialMoviesMap = Object.fromEntries(socialMovies.map(m => [m._id, m]));
+
     const enrichedRecommendations = recommendations.map(r => {
-      const details = recMovies.find(m => m._id === r.id);
-      return {
-        ...r,
-        ...(details || {}),
-      };
-      });
-      const enrichedSocial = socialRecommendations.map(r => {
-        const details = socialMovies.find(m => m._id === r.id);
-        return {
-          ...r,
-          ...(details || {})
-        };
-      });
+      const details = recMoviesMap[r.id] || {};
+      return { ...r, ...details };
+    });
+
+    const enrichedSocial = socialRecommendations.map(r => {
+      const details = socialMoviesMap[r.id] || {};
+      return { ...r, ...details };
+    });
 
     res.json({
   ...movie,
@@ -240,21 +267,13 @@ app.post('/api/movies/:id/reviews', async (req, res) => {
 
     await db.collection('reviews').insertOne(review);
 
-// TODO
-//    update movie invrement number of reviews and total of all reviews. You can calculate the average at readtime
-
-    // Recalculate avg_rating and review_count
-    const stats = await db.collection('reviews').aggregate([
-      { $match: { movie_id: req.params.id } },
-      { $group: { _id: null, avg: { $avg: '$rating' }, count: { $sum: 1 } } },
-    ]).toArray();
-
-    if (stats.length > 0) {
-      await db.collection('movies').updateOne(
-        { _id: req.params.id },
-        { $set: { avg_rating: Math.round(stats[0].avg * 10) / 10, review_count: stats[0].count } }
-      );
-    }
+    // Increment review_count and total_rating on the movie document.
+    // avg_rating is derived at read time as total_rating / review_count —
+    // no aggregation pipeline needed on every write.
+    await db.collection('movies').updateOne(
+      { _id: req.params.id },
+      { $inc: { review_count: 1, total_rating: Number(rating) } }
+    );
 
     res.status(201).json(review);
   } catch (err) {
@@ -338,28 +357,26 @@ app.get('/api/dashboard', async (req, res) => {
 
     /*
      * Aggregation pipeline 2 — Top Movies with Review Summary
-     * Joins movies with their reviews via $lookup, then computes per-movie
-     * stats (total reviews, avg rating, latest review date).
-     * Useful for a dashboard leaderboard of the best-reviewed films.
+     * avg_rating and review_count are stored directly on each movie document
+     * and kept up-to-date via $inc on every new review, so no $lookup into
+     * the reviews collection is needed here. We also derive avg_rating at
+     * read time from total_rating / review_count for accuracy.
      */
     const topMovies = await db.collection('movies').aggregate([
-      {
-        $lookup: {
-          from: 'reviews',
-          localField: '_id',
-          foreignField: 'movie_id',
-          as: 'review_docs',
-        },
-      },
       {
         $project: {
           title: 1,
           year: 1,
           genres: 1,
           director: 1,
-          avg_rating: 1,
           review_count: 1,
-          latest_review: { $max: '$review_docs.created_at' },
+          avg_rating: {
+            $cond: [
+              { $gt: ['$review_count', 0] },
+              { $round: [{ $divide: ['$total_rating', '$review_count'] }, 1] },
+              0,
+            ],
+          },
         },
       },
       { $sort: { avg_rating: -1, review_count: -1 } },
