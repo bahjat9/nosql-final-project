@@ -1,6 +1,27 @@
 version: '3.8'
 
 services:
+  mongodb:
+    image: mongo:7
+    container_name: movie_mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:latest
+    container_name: movie_redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
   neo4j:
     image: neo4j:5
     container_name: movie_neo4j
@@ -28,8 +49,14 @@ services:
     volumes:
       - .:/app
     depends_on:
-      - neo4j
+      mongodb:
+        condition: service_healthy
+      neo4j:
+        condition: service_started
+      redis:
+        condition: service_started
     restart: unless-stopped
 
 volumes:
+  mongodb_data:
   neo4j_data:

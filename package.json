@@ -1,26 +1,27 @@
 {
-  "name": "movie-platform-mongodb",
+  "name": "movie-platform",
   "version": "1.0.0",
-  "description": "MongoDB backend for the Movie Discovery & Review Platform",
+  "description": "MongoDB, Neo4j and Redis backend for the Movie Discovery & Review Platform",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "seed": "node seed-mongodb.js"
+    "seed": "node seed-mongodb.js && node seed-neo4j.js && node seed-redis.js"
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
     "dotenv": "^17.4.2",
     "express": "^4.22.1",
     "mongodb": "^6.21.0",
-    "neo4j-driver": "^6.0.1"
+    "neo4j-driver": "^6.0.1",
+    "redis": "^5.12.1"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/bahjat9/nosql-final-project.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "bugs": {
     "url": "https://github.com/bahjat9/nosql-final-project/issues"
   },
