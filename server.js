@@ -6,28 +6,34 @@ const { createClient } = require('redis');
 const app = express();
 app.use(express.json());
 
-// Rate limiting — max 100 requests per minute per IP using Redis
+// Rate limiting — max 10 requests per 60s window per IP
 app.use(async (req, res, next) => {
   if (!redis) return next();
   try {
-    const key = `rate:${req.ip}`;
+    const key = `ratelimit:${req.ip}`;
     const count = await redis.incr(key);
     if (count === 1) await redis.expire(key, 60);
-    if (count > 100) return res.status(429).json({ error: 'Too many requests, slow down' });
+    res.set('X-RateLimit-Limit', '10');
+    res.set('X-RateLimit-Remaining', String(Math.max(0, 10 - count)));
+    if (count > 10) {
+      res.set('Retry-After', '60');
+      return res.status(429).json({ error: 'Too many requests' });
+    }
     next();
   } catch {
     next();
   }
 });
 
-// Session validation — routes that require a valid session token
-// Pass header: Authorization: Bearer session:<user_id>_token
+// Session middleware — reads hash from Redis, slides TTL on every valid request
 async function requireSession(req, res, next) {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token) return res.status(401).json({ error: 'No session token provided' });
+  const sessionId = req.headers.authorization?.replace('Bearer ', '');
+  if (!sessionId) return res.status(401).json({ error: 'No session token provided' });
   try {
-    const status = await redis.get(token);
-    if (status !== 'active') return res.status(401).json({ error: 'Invalid or expired session' });
+    const data = await redis.hGetAll(`session:${sessionId}`);
+    if (!data || !data.userId) return res.status(401).json({ error: 'Invalid or expired session' });
+    await redis.expire(`session:${sessionId}`, 3600); // slide TTL
+    req.session = data;
     next();
   } catch {
     next();
@@ -364,7 +370,7 @@ app.get('/api/dashboard', async (req, res) => {
     // Check Redis cache first — return immediately if fresh data exists
     const cached = await redis.get(cacheKey);
     if (cached) {
-      return res.json({ ...JSON.parse(cached), from_cache: true });
+      return res.json({ ...JSON.parse(cached), source: 'cache' });
     }
 
     if (type === 'genre_stats') {
@@ -396,8 +402,8 @@ app.get('/api/dashboard', async (req, res) => {
         },
       ]).toArray();
 
-      const response = { type: 'genre_stats', data: genreStats };
-      await redis.set(cacheKey, JSON.stringify(response), { EX: 3600 });
+      const response = { type: 'genre_stats', data: genreStats, source: 'computed' };
+      await redis.set(cacheKey, JSON.stringify(response), { EX: 30 });
       return res.json(response);
     }
 
@@ -429,8 +435,8 @@ app.get('/api/dashboard', async (req, res) => {
       { $limit: 10 },
     ]).toArray();
 
-    const response = { type: 'top_movies', data: topMovies };
-    await redis.set(cacheKey, JSON.stringify(response), { EX: 3600 });
+    const response = { type: 'top_movies', data: topMovies, source: 'computed' };
+    await redis.set(cacheKey, JSON.stringify(response), { EX: 30 });
     res.json(response);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -440,16 +446,16 @@ app.get('/api/dashboard', async (req, res) => {
 // ── TRENDING ─────────────────────────────────────────────────────────────────
 
 // GET /api/trending — top movies from Redis sorted set, enriched with MongoDB data
+// Optional ?limit=N (default 10)
 app.get('/api/trending', async (req, res) => {
   try {
-    // Get top 10 movies by score from Redis leaderboard (highest score first)
-    const trending = await redis.zRangeWithScores('leaderboard:trending', 0, 9, { REV: true });
+    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+    const trending = await redis.zRangeWithScores('trending:movies', 0, limit - 1, { REV: true });
 
     if (!trending.length) return res.json([]);
 
     const ids = trending.map(t => t.value);
 
-    // Enrich with full movie details from MongoDB
     const movies = await db.collection('movies')
       .find({ _id: { $in: ids } })
       .project({ title: 1, year: 1, genres: 1, director: 1, avg_rating: 1, review_count: 1, total_rating: 1, poster: 1 })
@@ -475,11 +481,111 @@ app.get('/api/trending', async (req, res) => {
   }
 });
 
-// POST /api/trending/:id/view — increment a movie's trending score
+// GET /api/trending/daily — today's trending from daily sorted set
+app.get('/api/trending/daily', async (req, res) => {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const key = `trending:daily:${today}`;
+    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+    const trending = await redis.zRangeWithScores(key, 0, limit - 1, { REV: true });
+
+    if (!trending.length) return res.json({ date: today, data: [] });
+
+    const ids = trending.map(t => t.value);
+    const movies = await db.collection('movies')
+      .find({ _id: { $in: ids } })
+      .project({ title: 1, year: 1, genres: 1, director: 1, avg_rating: 1, review_count: 1, total_rating: 1 })
+      .toArray();
+
+    const moviesMap = Object.fromEntries(movies.map(m => [m._id, m]));
+
+    const data = trending.map(t => ({
+      ...(moviesMap[t.value] || {}),
+      _id: t.value,
+      daily_score: t.score,
+    }));
+
+    res.json({ date: today, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/trending/:id/view — atomically increment all-time + daily trending
 app.post('/api/trending/:id/view', async (req, res) => {
   try {
-    const newScore = await redis.zIncrBy('leaderboard:trending', 1, req.params.id);
+    const today = new Date().toISOString().slice(0, 10);
+    const dailyKey = `trending:daily:${today}`;
+
+    // Atomic pipeline: both increments succeed or fail together
+    const pipeline = redis.multi();
+    pipeline.zIncrBy('trending:movies', 1, req.params.id);
+    pipeline.zIncrBy(dailyKey, 1, req.params.id);
+    pipeline.expire(dailyKey, 86400);
+    const [newScore] = await pipeline.exec();
+
     res.json({ movie_id: req.params.id, trending_score: newScore });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── SESSIONS ─────────────────────────────────────────────────────────────────
+
+// POST /api/sessions/login — create a session hash in Redis
+app.post('/api/sessions/login', async (req, res) => {
+  try {
+    const { user_id, username, role } = req.body;
+    if (!user_id || !username) {
+      return res.status(400).json({ error: 'user_id and username are required' });
+    }
+    const sessionId = `${user_id}_token`;
+    const sessionKey = `session:${sessionId}`;
+    await redis.hSet(sessionKey, {
+      userId: user_id,
+      username,
+      role: role || 'user',
+      createdAt: new Date().toISOString(),
+    });
+    await redis.expire(sessionKey, 3600);
+    res.status(201).json({ session_id: sessionId, expires_in: 3600 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/sessions/:id — read session, slide TTL
+app.get('/api/sessions/:id', async (req, res) => {
+  try {
+    const sessionKey = `session:${req.params.id}`;
+    const data = await redis.hGetAll(sessionKey);
+    if (!data || !data.userId) return res.status(404).json({ error: 'Session not found or expired' });
+    await redis.expire(sessionKey, 3600);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/sessions/:id — logout / destroy session
+app.delete('/api/sessions/:id', async (req, res) => {
+  try {
+    const deleted = await redis.del(`session:${req.params.id}`);
+    if (!deleted) return res.status(404).json({ error: 'Session not found' });
+    res.json({ message: 'Session destroyed' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── CACHE MANAGEMENT ─────────────────────────────────────────────────────────
+
+// DELETE /api/dashboard/cache — manual cache bust for all dashboard keys
+app.delete('/api/dashboard/cache', async (req, res) => {
+  try {
+    const keys = await redis.keys('cache:dashboard:*');
+    if (keys.length) await redis.del(keys);
+    res.json({ message: 'Dashboard cache cleared', keys_deleted: keys.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

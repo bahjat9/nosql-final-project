@@ -95,8 +95,18 @@ GET http://localhost:3000/api/dashboard
 
 # ── REDIS: TRENDING ──────────────────────────────────────────
 
-### Get trending movies (from Redis sorted set leaderboard)
+### Get trending movies (from Redis sorted set - all time)
 GET http://localhost:3000/api/trending
+
+###
+
+### Get trending movies with custom limit
+GET http://localhost:3000/api/trending?limit=3
+
+###
+
+### Get today's daily trending
+GET http://localhost:3000/api/trending/daily
 
 ###
 
@@ -109,14 +119,47 @@ POST http://localhost:3000/api/trending/mov_inception/view
 GET http://localhost:3000/api/trending
 
 
-# ── REDIS: SESSION ───────────────────────────────────────────
+# ── REDIS: SESSIONS ──────────────────────────────────────────
 
-### Request with a valid session token (seeded by seed-redis.js)
+### Create a new session (login)
+POST http://localhost:3000/api/sessions/login
+Content-Type: application/json
+
+{
+  "user_id": "usr_001",
+  "username": "cinephile_alex",
+  "role": "user"
+}
+
+###
+
+### Read a session (seeded by seed-redis.js)
+GET http://localhost:3000/api/sessions/usr_991_token
+
+###
+
+### Delete a session (logout)
+DELETE http://localhost:3000/api/sessions/usr_991_token
+
+###
+
+### Verify session is gone after logout
+GET http://localhost:3000/api/sessions/usr_991_token
+
+###
+
+### Request with a valid session token (requireSession middleware)
 GET http://localhost:3000/api/users/usr_991
-Authorization: Bearer session:usr_991_token
+Authorization: Bearer usr_991_token
 
 ###
 
 ### Request with an invalid/expired session token
 GET http://localhost:3000/api/users/usr_001
-Authorization: Bearer session:fake_token
+Authorization: Bearer fake_token
+
+
+# ── REDIS: CACHE MANAGEMENT ──────────────────────────────────
+
+### Bust dashboard cache manually
+DELETE http://localhost:3000/api/dashboard/cache
