@@ -20,7 +20,6 @@ The databases share a common ID scheme (e.g. `mov_inception`, `usr_001`) so they
 
 - **Docker** and **Docker Compose**
 - **Node.js** and **npm**
-- **MongoDB Atlas account** (free tier) — for Atlas Search
 
 ---
 
@@ -39,31 +38,13 @@ cd nosql-final-project
 npm install
 ```
 
-### 3. Set up MongoDB Atlas
+### 3. Create your .env file
 
-1. Go to [cloud.mongodb.com](https://cloud.mongodb.com) and create a free M0 cluster
-2. Go to **Database Access** and create a database user with read/write permissions
-3. Go to **Network Access** and add `0.0.0.0/0` to allow connections from anywhere
-4. Click **Connect** on your cluster → **Drivers** → copy the connection string
-
-### 4. Create the Atlas Search index
-
-1. In Atlas, go to your cluster → **Search & Vector Search** (left sidebar)
-2. Click **Create Search Index** → **Visual Editor** → Next
-3. Select database `movie_platform` and collection `movies`
-4. Name the index exactly: `movies_search`
-5. Leave all other settings as default → **Create Search Index**
-6. Wait about 1 minute for the index status to show **Active**
-
-### 5. Create your .env file
-
-Create a file called `.env` in the project root:
+Create a file called `.env` in the project root with the following — a shared Atlas cluster is already provisioned with the Atlas Search index configured and ready:
 
 ```
-MONGO_URI=mongodb+srv://<username>:<password>@<cluster>.mongodb.net/movie_platform?retryWrites=true&w=majority
+MONGO_URI=mongodb+srv://ibaadshams212_db_user:MoviePass2024@cluster0.ksxvkjb.mongodb.net/movie_platform?retryWrites=true&w=majority
 ```
-
-Replace `<username>`, `<password>`, and `<cluster>` with your Atlas credentials.
 
 ---
 
