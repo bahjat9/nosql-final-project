@@ -42,10 +42,6 @@ npm install
 
 Create a file called `.env` in the project root with the following — a shared Atlas cluster is already provisioned with the Atlas Search index configured and ready:
 
-```
-MONGO_URI=mongodb+srv://ibaadshams212_db_user:MoviePass2024@cluster0.ksxvkjb.mongodb.net/movie_platform?retryWrites=true&w=majority
-```
-
 ---
 
 ## Running the Project
